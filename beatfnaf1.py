@@ -1,6 +1,6 @@
 import pyautogui as pg
 import psutil
-from pynput import keyboard
+# from pynput import keyboard
 import threading
 import time
 import os
@@ -18,6 +18,8 @@ onTitle = False
 star1 = False
 star2 = False
 star3 = False
+inOffice = False
+timedOut = False
 
 coordinates = {
     "leftLight" : (0.033854166666666664, 0.6351851851851852),
@@ -37,7 +39,13 @@ coordinates = {
     "customNight" : (0.26614583333333336, 0.8842592592592593),
     "star1" : (0.15729166666666666, 0.47685185185185186),
     "star2" : (0.21666666666666667, 0.4759259259259259),
-    "star3" : (0.27291666666666664, 0.4703703703703704)
+    "star3" : (0.27291666666666664, 0.4703703703703704),
+    "officeCheck" : (0.09895833333333333, 0.9361111111111111),
+    "freddyArrow" : (0.23385416666666667, 0.687037037037037),
+    "bonnieArrow" : (0.45208333333333334, 0.6861111111111111),
+    "chicaArrow" : (0.6770833333333334, 0.6824074074074075),
+    "foxyArrow" : (0.8958333333333334, 0.687962962962963),
+    "ready" : (0.8901041666666667, 0.9120370370370371)
 }
 
 # Monkey patch for pyautogui's "pixelMatchesColor" function
@@ -66,34 +74,33 @@ def customPMC(x=0, y=0, expectedRGBColor=(0, 0, 0), tolerance=0, sample=None):
         )
 pg.pixelMatchesColor = customPMC
 
-def onPress(key):
-    try:
-        match key.char:
-            case 'p':
-                print(f"{getPosition()[0]}, {getPosition()[1]}")
-            case 'c':
-                screenshot = pg.screenshot()
-                width, height = screenshot.size
-                print(screenshot.getpixel((int(getPosition()[0] * width), int(getPosition()[1] * height))))
-            case '1':
-                moveMouse(coordinates["star1"])
-            case '2':
-                moveMouse(coordinates["star2"])
-            case '3':
-                moveMouse(coordinates["star3"])
-    except: pass
-    try:
-        if key == keyboard.Key.space:
-            officeLoop()
-    except: pass
+# def onPress(key):
+#     try:
+#         match key.char:
+#             case 'p':
+#                 print(f"{getPosition()[0]}, {getPosition()[1]}")
+#             case 'c':
+#                 screenshot = pg.screenshot()
+#                 width, height = screenshot.size
+#                 print(screenshot.getpixel((int(getPosition()[0] * width), int(getPosition()[1] * height))))
+#             case '1':
+#                 moveMouse(coordinates["ready"])
+#             case '2':
+#                 moveMouse(coordinates["star2"])
+#             case '3':
+#                 moveMouse(coordinates["star3"])
+#     except: pass
+#     try:
+#         if key == keyboard.Key.space:
+#             officeLoop()
+#     except: pass
 
 def toggleButton(button):
-    global facingRight
     moveMouse(coordinates[button])
     if "left" in button:
-        while facingRight: time.sleep(0.01)
+        waitUntil(isNotFacingRight, 5.0)
     if "right" in button:
-        while not facingRight: time.sleep(0.01)
+        waitUntil(isFacingRight, 5.0)
     clickMouse()
 
 def toggleCamera():
@@ -105,6 +112,18 @@ def camera(cam):
     moveMouse(coordinates[cam])
     clickMouse()
 
+# Functions for detecting states
+def isCamUp():
+    global cameraUp
+    return cameraUp
+def isFacingRight():
+    global facingRight
+    return facingRight
+def isNotFacingRight():
+    global facingRight
+    return not facingRight
+
+
 # Controls the night gameplay
 def officeLoop():
     global cameraUp
@@ -112,10 +131,12 @@ def officeLoop():
     global leftDoorClosed
     global rightDoorClosed
     global foxyCheck
+    global timedOut
 
     # East hall corner at the start of the night
     toggleCamera()
-    while not cameraUp: time.sleep(0.01)
+    waitUntil(isCamUp, 5.0)
+    if timedOut: return
     camera("hallCorner")
     time.sleep(0.01)
     toggleCamera()
@@ -123,35 +144,43 @@ def officeLoop():
     while True:
         # Check left light
         lightCheck("leftLight")
+        if timedOut: break
 
         # Toggle door accordingly
         if robotAtDoor and not leftDoorClosed:
             leftDoorClosed = True
             toggleButton("leftDoor")
+            if timedOut: break
         elif leftDoorClosed and not robotAtDoor:
             leftDoorClosed = False
             toggleButton("leftDoor")
+            if timedOut: break
         robotAtDoor = False
 
         # Flip camera
         camFlip()
+        if timedOut: break
 
         # If haven't checked foxy in a while, then do that instead of checking Chica
         if foxyCheck >= 50:
             if not rightDoorClosed:
                 rightDoorClosed = True
                 toggleButton("rightDoor")
+                if timedOut: break
             else:
                 time.sleep(0.5)
             checkFoxy()
+            if timedOut: break
         else:
             checkChica()
 
             # Flip camera or check Foxy
             if foxyCheck >= 40 and rightDoorClosed:
                 checkFoxy()
+                if timedOut: break
             else:
                 camFlip()
+                if timedOut: break
 
         time.sleep(0.01)
 
@@ -159,7 +188,7 @@ def camFlip():
     global cameraUp
     global foxyCheck
     toggleCamera()
-    while not cameraUp: time.sleep(0.01)
+    waitUntil(isCamUp, 5.0)
     foxyCheck += 1
     toggleCamera()
 
@@ -178,7 +207,7 @@ def checkFoxy():
     foxyCheck = 0
     # Open camera and wait for it to open
     toggleCamera()
-    while not cameraUp: time.sleep(0.01)
+    waitUntil(isCamUp)
     # Switch to the west hall briefly to make Foxy run if he's there
     camera("westHall")
     time.sleep(0.05)
@@ -250,29 +279,60 @@ def detectStars():
         else: return 1
     else: return 0
 
+def waitUntil(condition, maxTime):
+    global timedOut
+    timedOut = False
+    endTime = time.time() + maxTime
+    while not condition():
+        time.sleep(0.01)
+        if time.time() >= endTime:
+            timedOut = True
+            break
+
 # This controls the flow of the game
 def gameLoop():
     global onTitle
     global star1
     global star2
     global star3
+    global inOffice
     # Wait for the title screen
     while True:
-        time.sleep(1.0)
-        if onTitle: break
-    # Detect how many stars there are
-    
-    stars = detectStars()
-    match stars:
-        case 0:
-            moveMouse(coordinates["continue"])
-        case 1:
-            moveMouse(coordinates["sixthNight"])
-        case 2:
-            moveMouse(coordinates["customNight"])
-        case 3:
-            os._exit(1)
-    clickMouse()
+        while True:
+            time.sleep(1.0)
+            if onTitle or inOffice: break
+
+        if onTitle and not inOffice:
+            # Detect how many stars there are
+            stars = detectStars()
+            match stars:
+                case 0:
+                    moveMouse(coordinates["continue"])
+                case 1:
+                    moveMouse(coordinates["sixthNight"])
+                case 2:
+                    moveMouse(coordinates["customNight"])
+                    # Set the mode to 20/20/20/20
+                    clickMouse()
+                    time.sleep(3.0)
+                    for i in range(4):
+                        moveMouse(coordinates[["freddyArrow","bonnieArrow","chicaArrow","foxyArrow"][i]])
+                        for _ in range([19, 17, 17, 19][i]):
+                            time.sleep(1.0)
+                            clickMouse()
+                    moveMouse(coordinates["ready"])
+                case 3:
+                    os._exit(1)
+            clickMouse()
+            time.sleep(1.0)
+            onTitle = False
+
+        if inOffice:
+            # Start office loop after 3 seconds
+            time.sleep(3.0)
+            officeLoop()
+            time.sleep(1.0)
+            inOffice = False
     
 
 # This loop is for checking states of the game and setting variables
@@ -284,6 +344,7 @@ def detectStates():
     global star1
     global star2
     global star3
+    global inOffice
     while True:
         # Getting a screenshot instead of calling pixel()
         # Without try it could throw a KeyboardInterrupt error
@@ -345,30 +406,35 @@ def detectStates():
                 if star2:
                     pixelCheck = getPixel("star3", screenshot)
                     star3 = pg.pixelMatchesColor(expectedRGBColor=(255, 255, 255), sample=pixelCheck)
+                
+                # Detect if inside the office
+                pixelCheck = getPixel("officeCheck", screenshot)
+                inOffice = pg.pixelMatchesColor(expectedRGBColor=(35, 235, 31), sample=pixelCheck, tolerance=5)
         except: pass
 
         time.sleep(0.05)
 
-listener = keyboard.Listener(on_press = onPress)
-listener.start()
+if __name__ == "__main__":
+    # listener = keyboard.Listener(on_press = onPress)
+    # listener.start()
 
-# Wait for the game to open before starting anything
-def isRunning(name):
-    for i in psutil.process_iter(["name"]):
-        if i.info["name"] == name:
-            return True
-    return False
+    # Wait for the game to open before starting anything
+    def isRunning(name):
+        for i in psutil.process_iter(["name"]):
+            if i.info["name"] == name:
+                return True
+        return False
 
-while True:
-    time.sleep(2.0)
-    if isRunning("FiveNightsatFreddys.exe"):
-        break
+    while True:
+        time.sleep(2.0)
+        if isRunning("FiveNightsatFreddys.exe"):
+            break
 
-# Wait 5 seconds to make sure the game is open in fullscreen
-time.sleep(5.0)
-moveMouse((0.6, 0.6))
+    # Wait 5 seconds to make sure the game is open in fullscreen
+    time.sleep(5.0)
+    moveMouse((0.6, 0.6))
 
-gameloopProcess = threading.Thread(target=gameLoop)
-detectProcess = threading.Thread(target=detectStates)
-gameloopProcess.start()
-detectProcess.start()
+    gameloopProcess = threading.Thread(target=gameLoop)
+    detectProcess = threading.Thread(target=detectStates)
+    gameloopProcess.start()
+    detectProcess.start()
